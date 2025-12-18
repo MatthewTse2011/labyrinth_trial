@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Labyrinth Ball Game</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #2c3e50;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            touch-action: none; /* Prevent scrolling on mobile */
+        }
+
+        #game-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        canvas {
+            background-color: #ecf0f1;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.3);
+            border-radius: 4px;
+        }
+
+        #ui-layer {
+            position: absolute;
+            top: 20px;
+            left: 0;
+            width: 100%;
+            text-align: center;
+            pointer-events: none;
+            color: white;
+            z-index: 10;
+        }
+
+        h1 {
+            margin: 0;
+            font-size: 24px;
+            text-shadow: 1px 1px 2px black;
+        }
+
+        p {
+            margin: 5px 0 0;
+            font-size: 14px;
+            opacity: 0.8;
+        }
+
+        #start-btn {
+            position: absolute;
+            bottom: 50px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 15px 30px;
+            background-color: #e74c3c;
+            color: white;
+            border: none;
+            border-radius: 30px;
+            font-size: 18px;
+            font-weight: bold;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+            cursor: pointer;
+            pointer-events: auto;
+            z-index: 20;
+            transition: transform 0.1s, background-color 0.2s;
+        }
+
+        #start-btn:active {
+            transform: translateX(-50%) scale(0.95);
+            background-color: #c0392b;
+        }
+
+        #debug-info {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            color: lime;
+            font-family: monospace;
+            font-size: 10px;
+            pointer-events: none;
+            display: none; /* Hidden by default, useful for testing */
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <div id="ui-layer">
+            <h1>Labyrinth</h1>
+            <p>Tilt your phone to guide the ball to the green zone.</p>
+        </div>
+        <canvas id="gameCanvas"></canvas>
+        <button id="start-btn">Start / Request Permission</button>
+        <div id="debug-info">Debug: Waiting...</div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const startBtn = document.getElementById('start-btn');
+        const debugInfo = document.getElementById('debug-info');
+
+        // Game State
+        let isPlaying = false;
+        let animationId;
+
+        // Physics Constants
+        const FRICTION = 0.96;       // 1.0 is no friction, 0.9 is heavy friction
+        const SENSITIVITY = 0.8;     // Higher = more responsive to tilt
+        const MAX_VELOCITY = 15;     // Cap the speed so it doesn't fly off too fast
+        const GRAVITY_SCALE = 0.5;   // How much gravity affects acceleration
+
+        // Ball Properties
+        const ball = {
+            x: 0,
+            y: 0,
+            radius: 10,
+            vx: 0,
+            vy: 0,
+            color: '#e74c3c'
+        };
+
+        // Goal Properties
+        const goal = {
+            x: 0,
+            y: 0,
+            radius: 20,
+            color: '#2ecc71'
+        };
+
+        // Walls Array
+        let walls = [];
+
+        // Device Orientation Data
+        let tiltX = 0; // Gamma (Left/Right)
+        let tiltY = 0; // Beta (Front/Back)
+
+        // Resize Canvas to fit screen nicely
+        function resizeCanvas() {
+            // We want a fixed aspect ratio game board, or full screen?
+            // Let's go with a responsive rectangle in the middle.
+            const maxWidth = window.innerWidth * 0.9;
+            const maxHeight = window.innerHeight * 0.8;
+            
+            canvas.width = maxWidth;
+            canvas.height = maxHeight;
+
+            resetGame();
+        }
+
+        function resetGame() {
+            // Start position
+            ball.x = 30;
+            ball.y = 30;
+            ball.vx = 0;
+            ball.vy = 0;
+
+            // Goal position (bottom right)
+            goal.x = canvas.width - 40;
+            goal.y = canvas.height - 40;
+
+            // Generate some random walls
+            generateMaze();
+        }
+
+        function generateMaze() {
+            walls = [];
+            const numWalls = 8;
+            
+            // Outer Border Walls
+            walls.push({x: 0, y: 0, w: canvas.width, h: 10}); // Top
+            walls.push({x: 0, y: canvas.height - 10, w: canvas.width, h: 10}); // Bottom
+            walls.push({x: 0, y: 0, w: 10, h: canvas.height}); // Left
+            walls.push({x: canvas.width - 10, y: 0, w: 10, h: canvas.height}); // Right
+
+            // Random obstacles
+            for (let i = 0; i < numWalls; i++) {
+                const w = Math.random() * 100 + 20;
+                const h = Math.random() * 100 + 20;
+                const x = Math.random() * (canvas.width - w - 60) + 30;
+                const y = Math.random() * (canvas.height - h - 60) + 30;
+                
+                // Don't spawn on top of start or goal
+                const distToStart = Math.hypot(x - ball.x, y - ball.y);
+                const distToGoal = Math.hypot(x - goal.x, y - goal.y);
+
+                if (distToStart > 100 && distToGoal > 100) {
+                    walls.push({x, y, w, h});
+                }
+            }
+        }
+
+        function handleOrientation(event) {
+            // Gamma is left-to-right tilt in degrees, where right is positive
+            // Beta is front-to-back tilt in degrees, where front is positive
+            
+            // Adjust based on device orientation (portrait vs landscape)
+            // This is a simplified check.
+            
+            let rawX = event.gamma; // -90 to 90
+            let rawY = event.beta;  // -180 to 180
+
+            // Constrain tilt to reasonable angles (e.g., -45 to 45 degrees)
+            // so you don't have to flip the phone upside down.
+            if (rawX > 45) rawX = 45;
+            if (rawX < -45) rawX = -45;
+            if (rawY > 45) rawY = 45;
+            if (rawY < -45) rawY = -45;
+
+            tiltX = rawX;
+            tiltY = rawY;
+
+            debugInfo.textContent = `X: ${Math.round(tiltX)} Y: ${Math.round(tiltY)}`;
+        }
+
+        function updatePhysics() {
+            // Apply forces based on tilt
+            // We multiply by SENSITIVITY to make it feel responsive
+            // We multiply by GRAVITY_SCALE to simulate physics
+            
+            // Deadzone: ignore very small tilts to prevent jitter
+            const deadzone = 2; 
+            let ax = 0;
+            let ay = 0;
+
+            if (Math.abs(tiltX) > deadzone) {
+                ax = tiltX * SENSITIVITY * GRAVITY_SCALE;
+            }
+            if (Math.abs(tiltY) > deadzone) {
+                ay = tiltY * SENSITIVITY * GRAVITY_SCALE;
+            }
+
+            ball.vx += ax * 0.1; // Time step factor
+            ball.vy += ay * 0.1;
+
+            // Apply Friction
+            ball.vx *= FRICTION;
+            ball.vy *= FRICTION;
+
+            // Clamp Velocity (Prevent it from moving too fast)
+            // This fixes the "moves much faster than expected" issue
+            if (ball.vx > MAX_VELOCITY) ball.vx = MAX_VELOCITY;
+            if (ball.vx < -MAX_VELOCITY) ball.vx = -MAX_VELOCITY;
+            if (ball.vy > MAX_VELOCITY) ball.vy = MAX_VELOCITY;
+            if (ball.vy < -MAX_VELOCITY) ball.vy = -MAX_VELOCITY;
+
+            // Update Position
+            ball.x += ball.vx;
+            ball.y += ball.vy;
+
+            // Collision Detection with Walls
+            checkWallCollisions();
+
+            // Collision with Goal
+            checkGoal();
+        }
+
+        function checkWallCollisions() {
+            for (let wall of walls) {
+                // AABB Collision (Axis-Aligned Bounding Box) vs Circle approximation
+                // Find the closest point on the rectangle to the circle center
+                let closestX = Math.max(wall.x, Math.min(ball.x, wall.x + wall.w));
+                let closestY = Math.max(wall.y, Math.min(ball.y, wall.y + wall.h));
+
+                let dx = ball.x - closestX;
+                let dy = ball.y - closestY;
+                let distance = Math.sqrt(dx * dx + dy * dy);
+
+                if (distance < ball.radius) {
+                    // Collision detected
+                    // Determine overlap
+                    let overlap = ball.radius - distance;
+
+                    // Normalize vector
+                    let nx = dx / distance;
+                    let ny = dy / distance;
+
+                    // If distance is 0 (center inside wall), push out arbitrarily
+                    if (distance === 0) { nx = 1; ny = 0; }
+
+                    // Push ball out
+                    ball.x += nx * overlap;
+                    ball.y += ny * overlap;
+
+                    // Bounce effect (reverse velocity)
+                    // Simple reflection
+                    if (Math.abs(nx) > Math.abs(ny)) {
+                        ball.vx *= -0.5; // Lose energy on bounce
+                    } else {
+                        ball.vy *= -0.5;
+                    }
+                }
+            }
+        }
+
+        function checkGoal() {
+            const dist = Math.hypot(ball.x - goal.x, ball.y - goal.y);
+            if (dist < ball.radius + goal.radius) {
+                // Win!
+                alert("You Win! Resetting...");
+                resetGame();
+            }
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw Goal
+            ctx.beginPath();
+            ctx.arc(goal.x, goal.y, goal.radius, 0, Math.PI * 2);
+            ctx.fillStyle = goal.color;
+            ctx.fill();
+            ctx.strokeStyle = '#27ae60';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            ctx.closePath();
+
+            // Draw Walls
+            ctx.fillStyle = '#34495e';
+            for (let wall of walls) {
+                ctx.fillRect(wall.x, wall.y, wall.w, wall.h);
+            }
+
+            // Draw Ball
+            ctx.beginPath();
+            ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+            ctx.fillStyle = ball.color;
+            ctx.fill();
+            // Add a shine to the ball
+            ctx.fillStyle = 'rgba(255,255,255,0.3)';
+            ctx.beginPath();
+            ctx.arc(ball.x - 3, ball.y - 3, ball.radius/2, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.closePath();
+        }
+
+        function gameLoop() {
+            if (!isPlaying) return;
+            updatePhysics();
+            draw();
+            animationId = requestAnimationFrame(gameLoop);
+        }
+
+        // Permission Request for iOS 13+
+        async function requestDeviceOrientation() {
+            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                try {
+                    const permissionState = await DeviceOrientationEvent.requestPermission();
+                    if (permissionState === 'granted') {
+                        window.addEventListener('deviceorientation', handleOrientation);
+                        startGame();
+                    } else {
+                        alert('Permission to access device orientation was denied');
+                    }
+                } catch (error) {
+                    console.error(error);
+                }
+            } else {
+                // Non-iOS 13+ devices
+                window.addEventListener('deviceorientation', handleOrientation);
+                startGame();
+            }
+        }
+
+        function startGame() {
+            isPlaying = true;
+            startBtn.style.display = 'none';
+            resetGame();
+            gameLoop();
+        }
+
+        // --- Event Listeners ---
+        window.addEventListener('resize', resizeCanvas);
+        startBtn.addEventListener('click', requestDeviceOrientation);
+
+        // Initial Setup
+        resizeCanvas();
+
+        // Fallback for desktop testing (Arrow keys)
+        window.addEventListener('keydown', (e) => {
+            if (!isPlaying) return;
+            const speed = 20; // Simulate strong tilt
+            if (e.key === 'ArrowUp') tiltY = -speed;
+            if (e.key === 'ArrowDown') tiltY = speed;
+            if (e.key === 'ArrowLeft') tiltX = -speed;
+            if (e.key === 'ArrowRight') tiltX = speed;
+        });
+        
+        window.addEventListener('keyup', () => {
+             tiltX = 0;
+             tiltY = 0;
+        });
+
+    </script>
+</body>
+</html>
