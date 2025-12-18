@@ -3,399 +3,566 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Labyrinth Ball Game</title>
+    <title>Labyrinth Tilt Game</title>
     <style>
         body {
             margin: 0;
+            padding: 0;
+            background-color: #121212;
             overflow: hidden;
-            background-color: #2c3e50;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            touch-action: none; /* Prevent scrolling on mobile */
-        }
-
-        #game-container {
-            position: relative;
-            width: 100vw;
-            height: 100vh;
+            touch-action: none; /* Prevent scrolling */
             display: flex;
             justify-content: center;
             align-items: center;
+            height: 100vh;
+        }
+
+        /* The wooden box container */
+        .wood-frame {
+            position: relative;
+            padding: 15px;
+            background-color: #8b5a2b;
+            /* Procedural wood texture */
+            background-image: 
+                repeating-linear-gradient(45deg, rgba(255,255,255,0.05) 0px, rgba(255,255,255,0.05) 2px, transparent 2px, transparent 4px),
+                linear-gradient(to bottom, #a06e3b, #6e4620);
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.8), inset 0 0 20px rgba(0,0,0,0.5);
+            border: 2px solid #4a2e13;
         }
 
         canvas {
-            background-color: #ecf0f1;
-            box-shadow: 0 10px 20px rgba(0,0,0,0.3);
-            border-radius: 4px;
+            display: block;
+            border-radius: 6px;
+            background: #333;
+            box-shadow: inset 0 0 10px #000;
         }
 
+        /* UI Overlay */
         #ui-layer {
             position: absolute;
-            top: 20px;
+            top: 0;
             left: 0;
             width: 100%;
-            text-align: center;
-            pointer-events: none;
-            color: white;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: rgba(0, 0, 0, 0.85);
             z-index: 10;
+            color: white;
+            text-align: center;
+            border-radius: 12px;
+            backdrop-filter: blur(2px);
+            transition: opacity 0.3s;
         }
 
         h1 {
-            margin: 0;
-            font-size: 24px;
-            text-shadow: 1px 1px 2px black;
+            font-size: 2.5rem;
+            margin: 0 0 10px 0;
+            color: #d4af37;
+            text-shadow: 2px 2px 0px #000;
         }
 
         p {
-            margin: 5px 0 0;
-            font-size: 14px;
-            opacity: 0.8;
+            margin: 0 0 25px 0;
+            font-size: 1.1rem;
+            color: #ccc;
+            max-width: 80%;
+            line-height: 1.5;
         }
 
-        #start-btn {
-            position: absolute;
-            bottom: 50px;
-            left: 50%;
-            transform: translateX(-50%);
-            padding: 15px 30px;
-            background-color: #e74c3c;
-            color: white;
-            border: none;
-            border-radius: 30px;
-            font-size: 18px;
+        .btn {
+            padding: 15px 40px;
+            font-size: 1.2rem;
             font-weight: bold;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+            background: linear-gradient(to bottom, #d4af37, #aa8c2c);
+            border: 1px solid #ffe680;
+            color: #222;
+            border-radius: 30px;
             cursor: pointer;
-            pointer-events: auto;
-            z-index: 20;
-            transition: transform 0.1s, background-color 0.2s;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+            transition: transform 0.1s, filter 0.1s;
+            text-transform: uppercase;
+            letter-spacing: 1px;
         }
 
-        #start-btn:active {
-            transform: translateX(-50%) scale(0.95);
-            background-color: #c0392b;
+        .btn:active {
+            transform: scale(0.95);
+            filter: brightness(0.9);
         }
 
-        #debug-info {
-            position: absolute;
-            bottom: 10px;
-            left: 10px;
-            color: lime;
-            font-family: monospace;
-            font-size: 10px;
+        .hidden {
+            opacity: 0;
             pointer-events: none;
-            display: none; /* Hidden by default, useful for testing */
+        }
+        
+        #level-indicator {
+            position: absolute;
+            top: 5px;
+            left: 0;
+            width: 100%;
+            text-align: center;
+            color: rgba(255,255,255,0.3);
+            font-size: 12px;
+            pointer-events: none;
+            font-weight: bold;
+            text-transform: uppercase;
         }
     </style>
 </head>
 <body>
 
-    <div id="game-container">
-        <div id="ui-layer">
-            <h1>Labyrinth</h1>
-            <p>Tilt your phone to guide the ball to the green zone.</p>
-        </div>
+    <div class="wood-frame">
+        <div id="level-indicator">Level 1</div>
         <canvas id="gameCanvas"></canvas>
-        <button id="start-btn">Start / Request Permission</button>
-        <div id="debug-info">Debug: Waiting...</div>
+        
+        <div id="ui-layer">
+            <h1 id="ui-title">Labyrinth</h1>
+            <p id="ui-text">Tilt your phone to guide the ball.<br>Avoid the holes!</p>
+            <button id="action-btn" class="btn">Start Game</button>
+        </div>
     </div>
 
-    <script>
-        const canvas = document.getElementById('gameCanvas');
-        const ctx = canvas.getContext('2d');
-        const startBtn = document.getElementById('start-btn');
-        const debugInfo = document.getElementById('debug-info');
+<script>
+/**
+ * ------------------------------------------------------------------
+ * LEVEL CONFIGURATION
+ * ------------------------------------------------------------------
+ * 0 = Floor
+ * 1 = Wall
+ * 2 = Hole
+ * 3 = Start Position (Ball spawns here)
+ * 4 = Goal (Green Hole)
+ */
+const LEVELS = [
+    // LEVEL 1: U-shape
+    [
+        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+        [1, 3, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 2, 0, 1],
+        [1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1],
+        [1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1],
+        [1, 0, 1, 0, 0, 2, 0, 0, 2, 0, 0, 1, 0, 0, 1],
+        [1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 1],
+        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+    ],
+    // LEVEL 2: Zig-zag
+    [
+        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+        [1, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 1],
+        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1],
+        [1, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+    ]
+];
 
-        // Game State
-        let isPlaying = false;
-        let animationId;
+/**
+ * GAME ENGINE
+ */
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const uiLayer = document.getElementById('ui-layer');
+const uiTitle = document.getElementById('ui-title');
+const uiText = document.getElementById('ui-text');
+const actionBtn = document.getElementById('action-btn');
+const levelIndicator = document.getElementById('level-indicator');
 
-        // Physics Constants
-        const FRICTION = 0.96;       // 1.0 is no friction, 0.9 is heavy friction
-        const SENSITIVITY = 0.8;     // Higher = more responsive to tilt
-        const MAX_VELOCITY = 15;     // Cap the speed so it doesn't fly off too fast
-        const GRAVITY_SCALE = 0.5;   // How much gravity affects acceleration
+// --- PHYSICS CONSTANTS (From the "Better Response" code) ---
+const FRICTION = 0.96;       
+const SENSITIVITY = 0.8;     // Higher sensitivity
+const MAX_VELOCITY = 15;     // Strict speed limit
+const GRAVITY_SCALE = 0.5;   // Gravity multiplier
+const DEADZONE = 2;          // Ignore tiny movements
 
-        // Ball Properties
-        const ball = {
-            x: 0,
-            y: 0,
-            radius: 10,
-            vx: 0,
-            vy: 0,
-            color: '#e74c3c'
+const BOUNCE = 0.4; // Wall bounce factor
+
+// State
+let currentLevelIdx = 0;
+let isPlaying = false;
+let tiltX = 0, tiltY = 0;
+let gameScale = 1;
+
+// Entities
+let ball = { x:0, y:0, vx:0, vy:0, r:0, color: '#e74c3c' };
+let holes = [];
+let walls = []; 
+let goal = null;
+
+// Keyboard State (Desktop Fallback)
+const keys = { Up:false, Down:false, Left:false, Right:false };
+
+// --- SETUP & RESIZE ---
+
+function loadLevel(index) {
+    if (index >= LEVELS.length) {
+        gameComplete();
+        return;
+    }
+
+    currentLevelIdx = index;
+    levelIndicator.textContent = `Level ${index + 1}`;
+    
+    const grid = LEVELS[index];
+    const rows = grid.length;
+    const cols = grid[0].length;
+
+    // Calculate Scale to fit screen
+    const maxWidth = window.innerWidth - 40;
+    const maxHeight = window.innerHeight - 40;
+    
+    gameScale = Math.min(maxWidth / cols, maxHeight / rows);
+    
+    canvas.width = cols * gameScale;
+    canvas.height = rows * gameScale;
+
+    // Reset Entities
+    holes = [];
+    walls = [];
+    goal = null;
+    ball.vx = 0;
+    ball.vy = 0;
+    ball.r = (gameScale / 2) * 0.75; 
+
+    // Parse Grid
+    for(let r=0; r<rows; r++){
+        for(let c=0; c<cols; c++){
+            const type = grid[r][c];
+            const cx = c * gameScale + gameScale/2;
+            const cy = r * gameScale + gameScale/2;
+
+            if(type === 1) {
+                walls.push({ c: c, r: r }); 
+            } else if(type === 2) {
+                holes.push({ x: cx, y: cy, r: gameScale * 0.35 });
+            } else if(type === 3) {
+                ball.x = cx;
+                ball.y = cy;
+            } else if(type === 4) {
+                goal = { x: cx, y: cy, r: gameScale * 0.4 };
+            }
+        }
+    }
+}
+
+function resize() {
+    if(isPlaying) {
+        const oldScale = gameScale;
+        const relX = ball.x / oldScale;
+        const relY = ball.y / oldScale;
+        
+        loadLevel(currentLevelIdx);
+        
+        ball.x = relX * gameScale;
+        ball.y = relY * gameScale;
+    } else {
+        loadLevel(currentLevelIdx);
+    }
+    draw();
+}
+
+// --- GAME LOOP ---
+
+function update() {
+    if(!isPlaying) return;
+
+    // 1. Calculate Forces (Using the improved logic)
+    let ax = 0;
+    let ay = 0;
+
+    // Keyboard Fallback
+    if(keys.Up) ay = -15;
+    if(keys.Down) ay = 15;
+    if(keys.Left) ax = -15;
+    if(keys.Right) ax = 15;
+
+    // Tilt Logic
+    // If tilt is present, it overrides keyboard
+    if(Math.abs(tiltX) > DEADZONE || Math.abs(tiltY) > DEADZONE) {
+        // Apply Deadzone logic
+        let tx = Math.abs(tiltX) > DEADZONE ? tiltX : 0;
+        let ty = Math.abs(tiltY) > DEADZONE ? tiltY : 0;
+
+        ax = tx * SENSITIVITY * GRAVITY_SCALE;
+        ay = ty * SENSITIVITY * GRAVITY_SCALE;
+    }
+
+    // Apply Acceleration to Velocity (with time step factor 0.1)
+    ball.vx += ax * 0.1;
+    ball.vy += ay * 0.1;
+    
+    // Apply Friction
+    ball.vx *= FRICTION;
+    ball.vy *= FRICTION;
+
+    // Strict Velocity Clamping (Fixes "too fast" issue)
+    if (ball.vx > MAX_VELOCITY) ball.vx = MAX_VELOCITY;
+    if (ball.vx < -MAX_VELOCITY) ball.vx = -MAX_VELOCITY;
+    if (ball.vy > MAX_VELOCITY) ball.vy = MAX_VELOCITY;
+    if (ball.vy < -MAX_VELOCITY) ball.vy = -MAX_VELOCITY;
+
+    // 2. Move
+    ball.x += ball.vx;
+    ball.y += ball.vy;
+
+    // 3. Wall Collision
+    checkWallCollisions();
+
+    // 4. Hole Collision
+    for(let h of holes) {
+        const dist = Math.hypot(ball.x - h.x, ball.y - h.y);
+        if(dist < h.r * 0.6) { // If close to center
+            playerDied();
+            return;
+        }
+    }
+
+    // 5. Goal Collision
+    if(goal) {
+        const dist = Math.hypot(ball.x - goal.x, ball.y - goal.y);
+        if(dist < goal.r * 0.5) {
+            levelComplete();
+            return;
+        }
+    }
+
+    draw();
+    requestAnimationFrame(update);
+}
+
+function checkWallCollisions() {
+    // Check Canvas Bounds
+    if(ball.x < ball.r) { ball.x = ball.r; ball.vx *= -BOUNCE; }
+    if(ball.y < ball.r) { ball.y = ball.r; ball.vy *= -BOUNCE; }
+    if(ball.x > canvas.width - ball.r) { ball.x = canvas.width - ball.r; ball.vx *= -BOUNCE; }
+    if(ball.y > canvas.height - ball.r) { ball.y = canvas.height - ball.r; ball.vy *= -BOUNCE; }
+
+    // Check Grid Walls
+    const col = Math.floor(ball.x / gameScale);
+    const row = Math.floor(ball.y / gameScale);
+
+    for(let r = row - 1; r <= row + 1; r++) {
+        for(let c = col - 1; c <= col + 1; c++) {
+            const isWall = walls.some(w => w.c === c && w.r === r);
+            if(isWall) {
+                resolveRectCollision(c * gameScale, r * gameScale, gameScale);
+            }
+        }
+    }
+}
+
+function resolveRectCollision(wx, wy, size) {
+    let testX = ball.x;
+    let testY = ball.y;
+
+    if (ball.x < wx) testX = wx;
+    else if (ball.x > wx + size) testX = wx + size;
+    
+    if (ball.y < wy) testY = wy;
+    else if (ball.y > wy + size) testY = wy + size;
+
+    const distX = ball.x - testX;
+    const distY = ball.y - testY;
+    const distance = Math.sqrt(distX*distX + distY*distY);
+
+    if (distance <= ball.r) {
+        let nx = distX / distance;
+        let ny = distY / distance;
+        
+        if(distance === 0) { nx=1; ny=0; } 
+
+        const overlap = ball.r - distance;
+        ball.x += nx * overlap;
+        ball.y += ny * overlap;
+
+        const dot = ball.vx * nx + ball.vy * ny;
+        ball.vx = (ball.vx - 2 * dot * nx) * BOUNCE;
+        ball.vy = (ball.vy - 2 * dot * ny) * BOUNCE;
+    }
+}
+
+// --- RENDERING ---
+
+function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // 1. Floor Texture
+    const floorGrad = ctx.createLinearGradient(0,0, canvas.width, canvas.height);
+    floorGrad.addColorStop(0, '#555');
+    floorGrad.addColorStop(1, '#333');
+    ctx.fillStyle = floorGrad;
+    ctx.fillRect(0,0, canvas.width, canvas.height);
+
+    // 2. Walls
+    ctx.fillStyle = '#222';
+    for(let w of walls) {
+        ctx.fillRect(w.c * gameScale, w.r * gameScale, gameScale+1, gameScale+1);
+    }
+    
+    // Wall Tops
+    ctx.fillStyle = '#3a3a3a'; 
+    const bevel = gameScale * 0.1;
+    for(let w of walls) {
+        ctx.fillRect(
+            w.c * gameScale + bevel, 
+            w.r * gameScale + bevel, 
+            gameScale - bevel*2, 
+            gameScale - bevel*2
+        );
+    }
+
+    // 3. Holes
+    for(let h of holes) {
+        ctx.beginPath();
+        ctx.arc(h.x, h.y, h.r, 0, Math.PI*2);
+        const g = ctx.createRadialGradient(h.x, h.y, h.r*0.2, h.x, h.y, h.r);
+        g.addColorStop(0, '#000');
+        g.addColorStop(1, 'rgba(0,0,0,0.5)');
+        ctx.fillStyle = g;
+        ctx.fill();
+    }
+
+    // 4. Goal
+    if(goal) {
+        ctx.beginPath();
+        ctx.arc(goal.x, goal.y, goal.r, 0, Math.PI*2);
+        ctx.fillStyle = '#000';
+        ctx.fill();
+        
+        ctx.save();
+        ctx.clip();
+        ctx.fillStyle = '#0f0';
+        const s = goal.r / 2.5;
+        for(let x=goal.x-goal.r; x<goal.x+goal.r; x+=s) {
+            for(let y=goal.y-goal.r; y<goal.y+goal.r; y+=s) {
+                if((Math.floor(x/s) + Math.floor(y/s)) % 2 === 0) 
+                    ctx.fillRect(x,y,s,s);
+            }
+        }
+        ctx.restore();
+    }
+
+    // 5. Ball (RED STYLE from the previous code)
+    // Draw Ball
+    ctx.beginPath();
+    ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI * 2);
+    ctx.fillStyle = ball.color; // Red
+    ctx.fill();
+    
+    // Add a shine to the ball
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.beginPath();
+    ctx.arc(ball.x - ball.r*0.3, ball.y - ball.r*0.3, ball.r/2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.closePath();
+}
+
+// --- GAME STATE MANAGEMENT ---
+
+function playerDied() {
+    isPlaying = false;
+    showUI("You Fell!", "Watch out for the holes.", "Try Again");
+}
+
+function levelComplete() {
+    isPlaying = false;
+    if(currentLevelIdx < LEVELS.length - 1) {
+        showUI("Level Complete!", "Great job!", "Next Level");
+        actionBtn.onclick = () => {
+            loadLevel(currentLevelIdx + 1);
+            startGame();
         };
+    } else {
+        gameComplete();
+    }
+}
 
-        // Goal Properties
-        const goal = {
-            x: 0,
-            y: 0,
-            radius: 20,
-            color: '#2ecc71'
-        };
+function gameComplete() {
+    showUI("You Win!", "You beat all levels!", "Play Again");
+    actionBtn.onclick = () => {
+        loadLevel(0);
+        startGame();
+    };
+}
 
-        // Walls Array
-        let walls = [];
+function showUI(title, text, btnText) {
+    uiTitle.textContent = title;
+    uiText.textContent = text;
+    actionBtn.textContent = btnText;
+    uiLayer.classList.remove('hidden');
+}
 
-        // Device Orientation Data
-        let tiltX = 0; // Gamma (Left/Right)
-        let tiltY = 0; // Beta (Front/Back)
+function startGame() {
+    uiLayer.classList.add('hidden');
+    isPlaying = true;
+    requestAnimationFrame(update);
+}
 
-        // Resize Canvas to fit screen nicely
-        function resizeCanvas() {
-            // We want a fixed aspect ratio game board, or full screen?
-            // Let's go with a responsive rectangle in the middle.
-            const maxWidth = window.innerWidth * 0.9;
-            const maxHeight = window.innerHeight * 0.8;
-            
-            canvas.width = maxWidth;
-            canvas.height = maxHeight;
+// --- INPUT HANDLERS ---
 
-            resetGame();
-        }
+actionBtn.addEventListener('click', async () => {
+    if(actionBtn.textContent === "Next Level" || actionBtn.textContent === "Play Again") {
+        // Logic handled in onclick overrides
+    }
 
-        function resetGame() {
-            // Start position
-            ball.x = 30;
-            ball.y = 30;
-            ball.vx = 0;
-            ball.vy = 0;
-
-            // Goal position (bottom right)
-            goal.x = canvas.width - 40;
-            goal.y = canvas.height - 40;
-
-            // Generate some random walls
-            generateMaze();
-        }
-
-        function generateMaze() {
-            walls = [];
-            const numWalls = 8;
-            
-            // Outer Border Walls
-            walls.push({x: 0, y: 0, w: canvas.width, h: 10}); // Top
-            walls.push({x: 0, y: canvas.height - 10, w: canvas.width, h: 10}); // Bottom
-            walls.push({x: 0, y: 0, w: 10, h: canvas.height}); // Left
-            walls.push({x: canvas.width - 10, y: 0, w: 10, h: canvas.height}); // Right
-
-            // Random obstacles
-            for (let i = 0; i < numWalls; i++) {
-                const w = Math.random() * 100 + 20;
-                const h = Math.random() * 100 + 20;
-                const x = Math.random() * (canvas.width - w - 60) + 30;
-                const y = Math.random() * (canvas.height - h - 60) + 30;
-                
-                // Don't spawn on top of start or goal
-                const distToStart = Math.hypot(x - ball.x, y - ball.y);
-                const distToGoal = Math.hypot(x - goal.x, y - goal.y);
-
-                if (distToStart > 100 && distToGoal > 100) {
-                    walls.push({x, y, w, h});
-                }
-            }
-        }
-
-        function handleOrientation(event) {
-            // Gamma is left-to-right tilt in degrees, where right is positive
-            // Beta is front-to-back tilt in degrees, where front is positive
-            
-            // Adjust based on device orientation (portrait vs landscape)
-            // This is a simplified check.
-            
-            let rawX = event.gamma; // -90 to 90
-            let rawY = event.beta;  // -180 to 180
-
-            // Constrain tilt to reasonable angles (e.g., -45 to 45 degrees)
-            // so you don't have to flip the phone upside down.
-            if (rawX > 45) rawX = 45;
-            if (rawX < -45) rawX = -45;
-            if (rawY > 45) rawY = 45;
-            if (rawY < -45) rawY = -45;
-
-            tiltX = rawX;
-            tiltY = rawY;
-
-            debugInfo.textContent = `X: ${Math.round(tiltX)} Y: ${Math.round(tiltY)}`;
-        }
-
-        function updatePhysics() {
-            // Apply forces based on tilt
-            // We multiply by SENSITIVITY to make it feel responsive
-            // We multiply by GRAVITY_SCALE to simulate physics
-            
-            // Deadzone: ignore very small tilts to prevent jitter
-            const deadzone = 2; 
-            let ax = 0;
-            let ay = 0;
-
-            if (Math.abs(tiltX) > deadzone) {
-                ax = tiltX * SENSITIVITY * GRAVITY_SCALE;
-            }
-            if (Math.abs(tiltY) > deadzone) {
-                ay = tiltY * SENSITIVITY * GRAVITY_SCALE;
-            }
-
-            ball.vx += ax * 0.1; // Time step factor
-            ball.vy += ay * 0.1;
-
-            // Apply Friction
-            ball.vx *= FRICTION;
-            ball.vy *= FRICTION;
-
-            // Clamp Velocity (Prevent it from moving too fast)
-            // This fixes the "moves much faster than expected" issue
-            if (ball.vx > MAX_VELOCITY) ball.vx = MAX_VELOCITY;
-            if (ball.vx < -MAX_VELOCITY) ball.vx = -MAX_VELOCITY;
-            if (ball.vy > MAX_VELOCITY) ball.vy = MAX_VELOCITY;
-            if (ball.vy < -MAX_VELOCITY) ball.vy = -MAX_VELOCITY;
-
-            // Update Position
-            ball.x += ball.vx;
-            ball.y += ball.vy;
-
-            // Collision Detection with Walls
-            checkWallCollisions();
-
-            // Collision with Goal
-            checkGoal();
-        }
-
-        function checkWallCollisions() {
-            for (let wall of walls) {
-                // AABB Collision (Axis-Aligned Bounding Box) vs Circle approximation
-                // Find the closest point on the rectangle to the circle center
-                let closestX = Math.max(wall.x, Math.min(ball.x, wall.x + wall.w));
-                let closestY = Math.max(wall.y, Math.min(ball.y, wall.y + wall.h));
-
-                let dx = ball.x - closestX;
-                let dy = ball.y - closestY;
-                let distance = Math.sqrt(dx * dx + dy * dy);
-
-                if (distance < ball.radius) {
-                    // Collision detected
-                    // Determine overlap
-                    let overlap = ball.radius - distance;
-
-                    // Normalize vector
-                    let nx = dx / distance;
-                    let ny = dy / distance;
-
-                    // If distance is 0 (center inside wall), push out arbitrarily
-                    if (distance === 0) { nx = 1; ny = 0; }
-
-                    // Push ball out
-                    ball.x += nx * overlap;
-                    ball.y += ny * overlap;
-
-                    // Bounce effect (reverse velocity)
-                    // Simple reflection
-                    if (Math.abs(nx) > Math.abs(ny)) {
-                        ball.vx *= -0.5; // Lose energy on bounce
-                    } else {
-                        ball.vy *= -0.5;
-                    }
-                }
-            }
-        }
-
-        function checkGoal() {
-            const dist = Math.hypot(ball.x - goal.x, ball.y - goal.y);
-            if (dist < ball.radius + goal.radius) {
-                // Win!
-                alert("You Win! Resetting...");
-                resetGame();
-            }
-        }
-
-        function draw() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-            // Draw Goal
-            ctx.beginPath();
-            ctx.arc(goal.x, goal.y, goal.radius, 0, Math.PI * 2);
-            ctx.fillStyle = goal.color;
-            ctx.fill();
-            ctx.strokeStyle = '#27ae60';
-            ctx.lineWidth = 2;
-            ctx.stroke();
-            ctx.closePath();
-
-            // Draw Walls
-            ctx.fillStyle = '#34495e';
-            for (let wall of walls) {
-                ctx.fillRect(wall.x, wall.y, wall.w, wall.h);
-            }
-
-            // Draw Ball
-            ctx.beginPath();
-            ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
-            ctx.fillStyle = ball.color;
-            ctx.fill();
-            // Add a shine to the ball
-            ctx.fillStyle = 'rgba(255,255,255,0.3)';
-            ctx.beginPath();
-            ctx.arc(ball.x - 3, ball.y - 3, ball.radius/2, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.closePath();
-        }
-
-        function gameLoop() {
-            if (!isPlaying) return;
-            updatePhysics();
-            draw();
-            animationId = requestAnimationFrame(gameLoop);
-        }
-
-        // Permission Request for iOS 13+
-        async function requestDeviceOrientation() {
-            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-                try {
-                    const permissionState = await DeviceOrientationEvent.requestPermission();
-                    if (permissionState === 'granted') {
-                        window.addEventListener('deviceorientation', handleOrientation);
-                        startGame();
-                    } else {
-                        alert('Permission to access device orientation was denied');
-                    }
-                } catch (error) {
-                    console.error(error);
-                }
+    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+        try {
+            const permission = await DeviceOrientationEvent.requestPermission();
+            if (permission === 'granted') {
+                window.addEventListener('deviceorientation', handleTilt);
+                startGame();
             } else {
-                // Non-iOS 13+ devices
-                window.addEventListener('deviceorientation', handleOrientation);
+                alert("Gyroscope permission denied. Use keyboard.");
                 startGame();
             }
+        } catch (e) {
+            startGame();
         }
+    } else {
+        window.addEventListener('deviceorientation', handleTilt);
+        startGame();
+    }
+});
 
-        function startGame() {
-            isPlaying = true;
-            startBtn.style.display = 'none';
-            resetGame();
-            gameLoop();
-        }
+function handleTilt(e) {
+    let x = e.gamma; // Left/Right
+    let y = e.beta;  // Front/Back
+    
+    // Clamp to 45 degrees (Prevent extreme tilting)
+    if(x > 45) x = 45; if(x < -45) x = -45;
+    if(y > 45) y = 45; if(y < -45) y = -45;
 
-        // --- Event Listeners ---
-        window.addEventListener('resize', resizeCanvas);
-        startBtn.addEventListener('click', requestDeviceOrientation);
+    tiltX = x;
+    tiltY = y;
+}
 
-        // Initial Setup
-        resizeCanvas();
+// Keyboard
+window.addEventListener('keydown', e => {
+    if(e.key === 'ArrowUp' || e.key === 'w') keys.Up = true;
+    if(e.key === 'ArrowDown' || e.key === 's') keys.Down = true;
+    if(e.key === 'ArrowLeft' || e.key === 'a') keys.Left = true;
+    if(e.key === 'ArrowRight' || e.key === 'd') keys.Right = true;
+});
+window.addEventListener('keyup', e => {
+    if(e.key === 'ArrowUp' || e.key === 'w') keys.Up = false;
+    if(e.key === 'ArrowDown' || e.key === 's') keys.Down = false;
+    if(e.key === 'ArrowLeft' || e.key === 'a') keys.Left = false;
+    if(e.key === 'ArrowRight' || e.key === 'd') keys.Right = false;
+});
 
-        // Fallback for desktop testing (Arrow keys)
-        window.addEventListener('keydown', (e) => {
-            if (!isPlaying) return;
-            const speed = 20; // Simulate strong tilt
-            if (e.key === 'ArrowUp') tiltY = -speed;
-            if (e.key === 'ArrowDown') tiltY = speed;
-            if (e.key === 'ArrowLeft') tiltX = -speed;
-            if (e.key === 'ArrowRight') tiltX = speed;
-        });
-        
-        window.addEventListener('keyup', () => {
-             tiltX = 0;
-             tiltY = 0;
-        });
+window.addEventListener('resize', resize);
 
-    </script>
+// Init
+loadLevel(0);
+draw();
+
+</script>
 </body>
 </html>
